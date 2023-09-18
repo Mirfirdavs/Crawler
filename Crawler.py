@@ -25,10 +25,11 @@ class Crawler:
 
     # 3. Разбиение текста на слова
     def separateWords(self, text):
-        return text.split()
+        return [word.lower() for word in text.split()]
 
     # 4. Проиндексирован ли URL (проверка наличия URL в БД)
     def isIndexed(self, url):
+        
         return False
 
     # 5. Добавление ссылки с одной страницы на другую
@@ -70,6 +71,9 @@ class Crawler:
                         pass
                     else:
                         pass
+                
+                onlyText = self.separateWords(soup.get_text())
+                
                 # обработать каждый тэг <a>
                 #   проверить наличие атрибута 'href'
                 #   убрать пустые ссылки, вырезать якоря из ссылок, и т.д.
@@ -97,34 +101,49 @@ class Crawler:
 
         # Создаем таблицы
         cursor.execute('''
-        CREATE TABLE IF NOT EXISTS Users (
+        CREATE TABLE IF NOT EXISTS wordList (
             rowId INTEGER PRIMARY KEY,
             word TEXT,
-            isFiltred INT);
+            isFiltred INTEGER
+            );
         ''')
 
-        cursor.execute("""CREATE TABLE IF NOT EXISTS URLList (
-            rowID INT PRIMARY KEY,
-            URL TEXT);
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS URLList (
+            rowId INTEGER PRIMARY KEY,
+            URL TEXT
+            );
         """)
 
-        cursor.execute("""CREATE TABLE IF NOT EXISTS wordLocation (
-            rowID INT PRIMARY KEY,
-            fk_wordId INT,
-            fk_URLId INT,
-            location INT);
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS wordLocation (
+            rowId INTEGER PRIMARY KEY,
+            fk_wordId INTEGER,
+            fk_URLId INTEGER,
+            location INTEGER,
+            FOREIGN KEY (fk_wordId) REFERENCES wordList (rowId),
+            FOREIGN KEY (fk_URLId) REFERENCES URLList (rowId)
+            );
         """)
 
-        cursor.execute("""CREATE TABLE IF NOT EXISTS linkBetweenURL (
-            rowID INT PRIMARY KEY,
-            fk_FromURL_Id INT,
-            fk_ToURL_id INT);
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS linkBetweenURL (
+            rowId INTEGER PRIMARY KEY,
+            fk_FromURL_Id INTEGER,
+            fk_ToURL_Id INTEGER,
+            FOREIGN KEY (fk_FromURL_Id) REFERENCES URLList (rowId),
+            FOREIGN KEY (fk_ToURL_id) REFERENCES URLList (rowId)
+            );
         """)
 
-        cursor.execute('''CREATE TABLE IF NOT EXISTS linkWord (
-            rowId INT PRIMARY KEY,
-            fk_wordId INT,
-            fk_linkId INT);
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS linkWord (
+            rowId INTEGER PRIMARY KEY,
+            fk_wordId INTEGER,
+            fk_linkId INTEGER,
+            FOREIGN KEY(fk_wordId) REFERENCES wordList (rowId),
+            FOREIGN KEY(fk_linkId) REFERENCES linkBetweenURL (rowId)
+            );
         ''')
         self.conn.commit()
 
