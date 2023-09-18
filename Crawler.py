@@ -17,11 +17,38 @@ class Crawler:
     
     # 1. Индексирование одной страницы
     def addIndex(self, soup, url):
-        pass
+        cursor = self.conn.cursor()
+
+        #Получените текст страницы (вы сможете использовать ваш метод getTextOnly)
+        pageText = self.getTextOnly(soup)
+
+        #Разделите текст на слова (вы можете использовать ваш метод separateWords
+        words = self.separateWords(pageText)
+
+        #Получите идентификатор URL из таблицы URLList или добавьте новый URL
+        cursor.execute("SELECT rowId FROM URLList WHERE URL=?", (url,))
+        row = cursor.fetchone()
+
+        if row is None:
+            cursor.execute("INSERT INTO URLList (URL) VALUES (?)", (url,))
+            self.conn.commit()
+            urlId = cursor.lastrowid
+        else:
+            urlId = row[0]
+
+        # Добавьте каждое слово в таблицу wordLocation
+        for i, word in enumerate(words):
+            cursor.execute("INSERT INTO wordList (word, isFiltred) VALUES (?, 0)", (word,))
+            self.conn.commit()
+            wordId = cursor.lastrowid
+            cursor.execute("INSERT INTO wordLocation (fk_wordId, fk_URLId, location) VALUES(?, ?, ?)", (wordId, UrlId, i))
+
+    self.conn.commit()
+
 
     # 2. Получение текста страницы
     def getTextOnly(self, text):
-        pass
+        return text
 
     # 3. Разбиение текста на слова
     def separateWords(self, text):
@@ -29,12 +56,27 @@ class Crawler:
 
     # 4. Проиндексирован ли URL (проверка наличия URL в БД)
     def isIndexed(self, url):
-        
-        return False
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT rowId FROM URLList WHERE URL=?", (url,))
+        row = cursor.fetchone()
+        return row is not None
 
     # 5. Добавление ссылки с одной страницы на другую
     def addLinkRef(self, urlFrom, urlTo, linkText):
-        pass
+        cursor = self.conn.cursor()
+
+        # Получите идентификатор URl для страницы, с которой исходит ссылка
+        cursor.execute("SELECT rowId FROM URLList WHERE URL=?", (urlFrom,))
+        fromId = cursor.fetchone()[0]
+
+        # Получите идентификатор URL для страницы, на которую ведет ссылка
+        cursor.execute("SELECT rowId FROM URLList WHERE URL=?", (urlTo,))
+        toId = cursor.fetchone()[0]
+
+        # Добавьте запись о ссылке
+        cursor.execute("INSERT INTO linkBetweenURL (fk_FromURL_Id, fk_ToURL_Id) VALUES (?, ?)", (fromId, toId))
+
+        self.conn.commit()
 
 
     # 6. Непосредственно сам метод сбора данных.
@@ -44,54 +86,50 @@ class Crawler:
         print("6. Обход страниц")
         
         for currDepth in range(0, maxDepth):
+            # Создаем список для хранения URL следующей глубины
+            nextDepthURLs = []
 
             # Вар.1. обход каждого url на текущей глубине
             for url in  urlList:
+                try:
+                    # получить HTML-код страницы по текущему url
+                    html_doc = requests.get(url).text
 
-                # получить HTML-код страницы по текущему url
-                html_doc = requests.get(url).text
+                    # использовать парсер для работа тегов
+                    soup = BeautifulSoup(html_doc, "html.parser")
+                    
+                    listUnwantedItems = ['script', 'style']
+                    for script in soup.find_all(listUnwantedItems):
+                        script.decompose()
 
-                # использовать парсер для работа тегов
-                soup = BeautifulSoup(html_doc, "html.parser")
-                
-                listUnwantedItems = ['script', 'style']
-                for script in soup.find_all(listUnwantedItems):
-                    script.decompose()
+                    # получить список тэгов <a> с текущей страницы
+                    foundLinks = soup.find_all('a')
 
-                # получить список тэгов <a> с текущей страницы
-                foundLinks = soup.find_all('a')
-                for link in foundLinks:
-                    if link['href'] and link['href'] == '#':
-                        continue
-                    if link['href'] in urlList:
-                        continue
-                    if link['href'] in links:
-                        continue
-                    if link['href'].startswith('/'):
-                        pass
-                    else:
-                        pass
-                
-                onlyText = self.separateWords(soup.get_text())
-                
-                # обработать каждый тэг <a>
-                #   проверить наличие атрибута 'href'
-                #   убрать пустые ссылки, вырезать якоря из ссылок, и т.д.
-                #   выделить ссылку 
-                #   добавить ссылку в список следующих на обход
-                #   извлечь из тэг <a> текст linkText
-                #   добавить в таблицу linkbeetwenurl БД ссылку с одной страницы на другую
+                    for link in foundLinks:
+                        href = link.get('href')
+                        if href and not href.startswith('#') and not href.startswith('mailto:'):
+                            # Преобразовать относительные URL в абсолютные
+                            if not href.startswith('http'):
+                                href = url + href
 
-                # вызвать функцию класса Crawler для добавления содержимого в индекс
-                self.addToIndex (soup, url)
+                            # Добавить ссылку в список следующей глубины
+                            nextDepthURLs.append(href)
 
-                # конец обработки текущ url
-                pass
+                            # Извлечь текст из тега <a>
+                            linkText = link.get_text()
 
-            # конец обработки всех URL на данной глубине
-            pass
-        pass  
+                            # Добавить ссылку в таблицу linkBetweenURL в базе данных
+                            self.addLinkRef(url, href, linkText)
 
+                    # Вызвать функцию класса Crawler для добавления содержимого в индекс
+                    self.addIndex(soup, url)
+                except Exception as e:
+                    print(f"Ошибка при обработке {url}: {str(e)}")
+                    
+                # Переход к следующей глубине
+            urlList = nextDepthURLs
+
+        print("Завершено.")
 
     # 7. Инициализация таблиц в БД
     def initDB(self, ):
@@ -132,7 +170,7 @@ class Crawler:
             fk_FromURL_Id INTEGER,
             fk_ToURL_Id INTEGER,
             FOREIGN KEY (fk_FromURL_Id) REFERENCES URLList (rowId),
-            FOREIGN KEY (fk_ToURL_id) REFERENCES URLList (rowId)
+            FOREIGN KEY (fk_ToURL_Id) REFERENCES URLList (rowId)
             );
         """)
 
@@ -150,4 +188,13 @@ class Crawler:
     # 8. Вспомогательная функция для получения идентификатора и
     # добавления записи, если такой еще нет
     def getEntryId(self, tableName, fieldName, value):
-        return 1
+        cursor = self.conn.cursor()
+        cursor.execute(f"SELECT rowId FROM {tableName} WHERE {fieldName}=?", (value,))
+        row = cursor.fetchone()
+
+        if row is not None:
+            return row[0]
+        else:
+            cursor.execute(f"INSERT INTO {tableName} ({fieldName}) VALUES (?)", (value,))
+            self.conn.commit()
+            return cursor.lastrowid
