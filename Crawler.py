@@ -3,7 +3,6 @@ from bs4 import BeautifulSoup
 import sqlite3
 
 class Crawler:
-
     # 0. Конструктор Инициализация паука с параметрами БД
     def __init__(self, dbFileName):
         print("Конструктор работает".center(70, '-'))
@@ -21,7 +20,7 @@ class Crawler:
 
         #Получените текст страницы (вы сможете использовать ваш метод getTextOnly)
         pageText = self.getTextOnly(soup)
-
+        
         #Разделите текст на слова (вы можете использовать ваш метод separateWords
         words = self.separateWords(pageText)
 
@@ -41,9 +40,9 @@ class Crawler:
             cursor.execute("INSERT INTO wordList (word, isFiltred) VALUES (?, 0)", (word,))
             self.conn.commit()
             wordId = cursor.lastrowid
-            cursor.execute("INSERT INTO wordLocation (fk_wordId, fk_URLId, location) VALUES(?, ?, ?)", (wordId, UrlId, i))
+            cursor.execute("INSERT INTO wordLocation (fk_wordId, fk_URLId, location) VALUES(?, ?, ?)", (wordId, urlId, i))
 
-    self.conn.commit()
+        self.conn.commit()
 
 
     # 2. Получение текста страницы
@@ -74,15 +73,17 @@ class Crawler:
         toId = cursor.fetchone()[0]
 
         # Добавьте запись о ссылке
-        cursor.execute("INSERT INTO linkBetweenURL (fk_FromURL_Id, fk_ToURL_Id) VALUES (?, ?)", (fromId, toId))
-
+        cursor.execute("SELECT fk_ToURL_Id FROM linkBetweenURL WHERE fk_ToURL_Id=?; ", (toId, ))
+        result = cursor.fetchone()
+        if result is None:
+            cursor.execute("INSERT INTO linkBetweenURL (fk_FromURL_Id, fk_ToURL_Id) VALUES (?, ?)", (fromId, toId))
         self.conn.commit()
 
 
     # 6. Непосредственно сам метод сбора данных.
     # Начиная с заданного списка страниц, выполняет поиск в ширину
     # до заданной глубины, индексируя все встречающиеся по пути страницы
-    def crawl(self, urlList, maxDepth=2):
+    def crawl(self, urlList, maxDepth=1):
         print("6. Обход страниц")
         
         for currDepth in range(0, maxDepth):
@@ -92,13 +93,16 @@ class Crawler:
             # Вар.1. обход каждого url на текущей глубине
             for url in  urlList:
                 try:
+                    if url.endswith('/'):
+                        url = url[:-1]
+                    self.addUrlToURLList(url)
+                    
                     # получить HTML-код страницы по текущему url
                     html_doc = requests.get(url).text
-
                     # использовать парсер для работа тегов
                     soup = BeautifulSoup(html_doc, "html.parser")
                     
-                    listUnwantedItems = ['script', 'style']
+                    listUnwantedItems = ['script', 'style', 'noscript']
                     for script in soup.find_all(listUnwantedItems):
                         script.decompose()
 
@@ -110,10 +114,20 @@ class Crawler:
                         if href and not href.startswith('#') and not href.startswith('mailto:'):
                             # Преобразовать относительные URL в абсолютные
                             if not href.startswith('http'):
-                                href = url + href
-
+                                href = url + href[1:]
+                            # Удаление не нужных якорей
+                            if '#' in href:
+                                href = href.split('#')[0]
+                            if '?' in href:
+                                href = href.split('?')[0]
+                            
+                            if href.endswith('/'):
+                                href = href[:-1]
+                            
                             # Добавить ссылку в список следующей глубины
                             nextDepthURLs.append(href)
+                            # Добавление в табоицу URLList
+                            self.addUrlToURLList(href)
 
                             # Извлечь текст из тега <a>
                             linkText = link.get_text()
@@ -135,7 +149,14 @@ class Crawler:
     def initDB(self, ):
         print("Создаем пустые таблицы с необходимой структурой")
         # Устанавливаем соединение с базой данных
+        
+        # удаляем если уже  есть таблицы
         cursor = self.conn.cursor()
+        cursor.execute("""DROP TABLE IF EXISTS wordList""")
+        cursor.execute("""DROP TABLE IF EXISTS URLList""")
+        cursor.execute("""DROP TABLE IF EXISTS wordLocation""")
+        cursor.execute("""DROP TABLE IF EXISTS linkBetweenURL""")
+        cursor.execute("""DROP TABLE IF EXISTS linkWord""")
 
         # Создаем таблицы
         cursor.execute('''
@@ -198,3 +219,13 @@ class Crawler:
             cursor.execute(f"INSERT INTO {tableName} ({fieldName}) VALUES (?)", (value,))
             self.conn.commit()
             return cursor.lastrowid
+
+    # Добавление url в таблицу URLList
+    def addUrlToURLList(self, url):
+        url = str(url)
+        cursor = self.conn.cursor()
+        result = cursor.execute("SELECT URL FROM URLList WHERE URL=?; ", (url,)).fetchall()
+        
+        if len(result) == 0:
+            cursor.execute("INSERT INTO URLList (URL) VALUES (?) ", (url,))
+        self.conn.commit()
