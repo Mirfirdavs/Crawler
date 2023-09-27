@@ -47,6 +47,15 @@ class Crawler:
 
     # 2. Получение текста страницы
     def getTextOnly(self, text):
+        def match(word):
+            alphabet = set('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZβ!@#$%^&*()_-?></-*+©')
+            return alphabet.isdisjoint(word)
+        
+        text = text.split()
+        for word in text:
+            if not match(word):
+                text.remove(word)
+                
         return text
 
     # 3. Разбиение текста на слова
@@ -56,9 +65,9 @@ class Crawler:
     # 4. Проиндексирован ли URL (проверка наличия URL в БД)
     def isIndexed(self, url):
         cursor = self.conn.cursor()
-        cursor.execute("SELECT rowId FROM URLList WHERE URL=?", (url,))
-        row = cursor.fetchone()
-        return row is not None
+        cursor.execute("SELECT fk_ToURL_Id FROM linkBetweenURL WHERE fk_ToURL_Id=?", (url,))
+        result = cursor.fetchone()
+        return result is not None
 
     # 5. Добавление ссылки с одной страницы на другую
     def addLinkRef(self, urlFrom, urlTo, linkText):
@@ -73,9 +82,7 @@ class Crawler:
         toId = cursor.fetchone()[0]
 
         # Добавьте запись о ссылке
-        cursor.execute("SELECT fk_ToURL_Id FROM linkBetweenURL WHERE fk_ToURL_Id=?; ", (toId, ))
-        result = cursor.fetchone()
-        if result is None:
+        if not self.isIndexed(toId):
             cursor.execute("INSERT INTO linkBetweenURL (fk_FromURL_Id, fk_ToURL_Id) VALUES (?, ?)", (fromId, toId))
         self.conn.commit()
 
@@ -132,11 +139,13 @@ class Crawler:
                             # Извлечь текст из тега <a>
                             linkText = link.get_text()
 
+                            # Извлечь текст
+                            print(self.getTextOnly(soup.text))
                             # Добавить ссылку в таблицу linkBetweenURL в базе данных
                             self.addLinkRef(url, href, linkText)
 
                     # Вызвать функцию класса Crawler для добавления содержимого в индекс
-                    self.addIndex(soup, url)
+                    #self.addIndex(soup, url)
                 except Exception as e:
                     print(f"Ошибка при обработке {url}: {str(e)}")
                     
