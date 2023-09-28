@@ -17,31 +17,20 @@ class Crawler:
     # 1. Индексирование одной страницы
     def addIndex(self, soup, url):
         cursor = self.conn.cursor()
-
-        #Получените текст страницы (вы сможете использовать ваш метод getTextOnly)
-        pageText = self.getTextOnly(soup)
-        
-        #Разделите текст на слова (вы можете использовать ваш метод separateWords
-        words = self.separateWords(pageText)
-
-        #Получите идентификатор URL из таблицы URLList или добавьте новый URL
-        cursor.execute("SELECT rowId FROM URLList WHERE URL=?", (url,))
-        row = cursor.fetchone()
-
-        if row is None:
-            cursor.execute("INSERT INTO URLList (URL) VALUES (?)", (url,))
-            self.conn.commit()
-            urlId = cursor.lastrowid
-        else:
-            urlId = row[0]
+        url = str(url)
+        text = soup.text.split()
+        result = cursor.execute("SELECT rowId FROM URLList WHERE URL=?", (url,)).fetchone()
 
         # Добавьте каждое слово в таблицу wordLocation
-        for i, word in enumerate(words):
-            cursor.execute("INSERT INTO wordList (word, isFiltred) VALUES (?, 0)", (word,))
+        for index, word in enumerate(text):
+            isWordInDB = cursor.execute("SELECT word FROM wordList WHERE word=?", (word,)).fetchone()
+            if isWordInDB is None:
+                cursor.execute("INSERT INTO wordList (word) VALUES (?)", (word,))
             self.conn.commit()
-            wordId = cursor.lastrowid
-            cursor.execute("INSERT INTO wordLocation (fk_wordId, fk_URLId, location) VALUES(?, ?, ?)", (wordId, urlId, i))
-
+            
+            rowId = cursor.execute("SELECT rowId FROM wordList WHERE word=?", (word,)).fetchone()
+            cursor.execute("INSERT INTO wordLocation (fk_wordId, fk_URLId, location) VALUES (?, ?, ?)", (rowId[0], result[0], index))
+            self.conn.commit()
         self.conn.commit()
 
 
@@ -121,7 +110,7 @@ class Crawler:
                         if href and not href.startswith('#') and not href.startswith('mailto:'):
                             # Преобразовать относительные URL в абсолютные
                             if not href.startswith('http'):
-                                href = url + href[1:]
+                                href = url + href
                             # Удаление не нужных якорей
                             if '#' in href:
                                 href = href.split('#')[0]
@@ -140,18 +129,20 @@ class Crawler:
                             linkText = link.get_text()
 
                             # Извлечь текст
-                            print(self.getTextOnly(soup.text))
+                            #print(self.getTextOnly(soup.text))
                             # Добавить ссылку в таблицу linkBetweenURL в базе данных
                             self.addLinkRef(url, href, linkText)
 
                     # Вызвать функцию класса Crawler для добавления содержимого в индекс
-                    #self.addIndex(soup, url)
+                    self.addIndex(soup, url)
                 except Exception as e:
                     print(f"Ошибка при обработке {url}: {str(e)}")
                     
                 # Переход к следующей глубине
+            for item in nextDepthURLs:
+                if url in item:
+                    nextDepthURLs.remove(item)
             urlList = nextDepthURLs
-
         print("Завершено.")
 
     # 7. Инициализация таблиц в БД
