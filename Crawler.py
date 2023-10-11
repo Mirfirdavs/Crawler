@@ -1,12 +1,14 @@
 import requests
 from bs4 import BeautifulSoup
 import sqlite3
+import re
+import random
+
 
 class Crawler:
     # 0. Конструктор Инициализация паука с параметрами БД
     def __init__(self, dbFileName):
         print("Конструктор работает".center(70, '-'))
-        
         self.conn=sqlite3.connect(dbFileName)
 
     # 0. Деструктор
@@ -14,42 +16,46 @@ class Crawler:
         print("Деструктор".center(70, '-'))
         self.conn.close()
     
+    # Добавление url в таблицу URLList
+    def addUrlToURLList(self, url):
+        url = str(url)
+        cursor = self.conn.cursor()
+        result = cursor.execute("SELECT URL FROM URLList WHERE URL=?; ", (url,)).fetchone()
+        if result is None:
+            cursor.execute("INSERT INTO URLList (URL) VALUES (?) ", (url,))
+        self.conn.commit()
+    
     # 1. Индексирование одной страницы
     def addIndex(self, soup, url):
-        cursor = self.conn.cursor()
         url = str(url)
-        text = soup.text.split()
+        separatedWordList = self.getTextOnly(soup)
+        
+        cursor = self.conn.cursor()
         result = cursor.execute("SELECT rowId FROM URLList WHERE URL=?", (url,)).fetchone()
 
         # Добавьте каждое слово в таблицу wordLocation
-        for index, word in enumerate(text):
+        for index, word in enumerate(separatedWordList):
             isWordInDB = cursor.execute("SELECT word FROM wordList WHERE word=?", (word,)).fetchone()
             if isWordInDB is None:
                 cursor.execute("INSERT INTO wordList (word) VALUES (?)", (word,))
-            self.conn.commit()
             
-            rowId = cursor.execute("SELECT rowId FROM wordList WHERE word=?", (word,)).fetchone()
-            cursor.execute("INSERT INTO wordLocation (fk_wordId, fk_URLId, location) VALUES (?, ?, ?)", (rowId[0], result[0], index))
-            self.conn.commit()
+                rowId = cursor.execute("SELECT rowId FROM wordList WHERE word=?", (word,)).fetchone()
+                cursor.execute("INSERT INTO wordLocation (fk_wordId, fk_URLId, location) VALUES (?, ?, ?)", (rowId[0], result[0], index))
+        
         self.conn.commit()
 
 
     # 2. Получение текста страницы
-    def getTextOnly(self, text):
-        def match(word):
-            alphabet = set('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZβ!@#$%^&*()_-?></-*+©')
-            return alphabet.isdisjoint(word)
+    def getTextOnly(self, soup):
+        allTextOnPage = soup.text
+        pattern = re.compile(r'\b[a-zA-Zа-яА-Я]+\b')
+        separatedWordList = re.findall(pattern, allTextOnPage)
         
-        text = text.split()
-        for word in text:
-            if not match(word):
-                text.remove(word)
-                
-        return text
+        return separatedWordList
 
     # 3. Разбиение текста на слова
     def separateWords(self, text):
-        return [word.lower() for word in text.split()]
+        return text
 
     # 4. Проиндексирован ли URL (проверка наличия URL в БД)
     def isIndexed(self, url):
@@ -75,19 +81,18 @@ class Crawler:
             cursor.execute("INSERT INTO linkBetweenURL (fk_FromURL_Id, fk_ToURL_Id) VALUES (?, ?)", (fromId, toId))
         self.conn.commit()
 
-
     # 6. Непосредственно сам метод сбора данных.
     # Начиная с заданного списка страниц, выполняет поиск в ширину
     # до заданной глубины, индексируя все встречающиеся по пути страницы
     def crawl(self, urlList, maxDepth=1):
         print("6. Обход страниц")
-        
+        the_depth = 2
         for currDepth in range(0, maxDepth):
             # Создаем список для хранения URL следующей глубины
             nextDepthURLs = []
-
             # Вар.1. обход каждого url на текущей глубине
             for url in  urlList:
+                print(f"Индексируем  {url}")
                 try:
                     if url.endswith('/'):
                         url = url[:-1]
@@ -97,6 +102,9 @@ class Crawler:
                     html_doc = requests.get(url).text
                     # использовать парсер для работа тегов
                     soup = BeautifulSoup(html_doc, "html.parser")
+                    
+                    # Вызвать функцию класса Crawler для добавления содержимого в индекс
+                    self.addIndex(soup, url)
                     
                     listUnwantedItems = ['script', 'style', 'noscript']
                     for script in soup.find_all(listUnwantedItems):
@@ -129,20 +137,20 @@ class Crawler:
                             linkText = link.get_text()
 
                             # Извлечь текст
-                            #print(self.getTextOnly(soup.text))
                             # Добавить ссылку в таблицу linkBetweenURL в базе данных
                             self.addLinkRef(url, href, linkText)
-
-                    # Вызвать функцию класса Crawler для добавления содержимого в индекс
-                    self.addIndex(soup, url)
+                            self.addToLinkWord(url, href, linkText)
+                    
                 except Exception as e:
                     print(f"Ошибка при обработке {url}: {str(e)}")
-                    
+                print('Переход')
                 # Переход к следующей глубине
-            for item in nextDepthURLs:
-                if url in item:
-                    nextDepthURLs.remove(item)
-            urlList = nextDepthURLs
+            if len(nextDepthURLs) >= the_depth * 2:
+                urlList = random.choices(nextDepthURLs, k=the_depth*2)
+            else:
+                urlList = nextDepthURLs
+            print(f"Глубина: {the_depth}   Список:  {urlList}")
+            the_depth += 1
         print("Завершено.")
 
     # 7. Инициализация таблиц в БД
@@ -206,26 +214,22 @@ class Crawler:
         ''')
         self.conn.commit()
 
-    # 8. Вспомогательная функция для получения идентификатора и
-    # добавления записи, если такой еще нет
-    def getEntryId(self, tableName, fieldName, value):
+    # 8. Функция для добавления слов в таблицу linkWord
+    def addToLinkWord(self, url, href, linkText):
+        linkText = linkText.split()
         cursor = self.conn.cursor()
-        cursor.execute(f"SELECT rowId FROM {tableName} WHERE {fieldName}=?", (value,))
-        row = cursor.fetchone()
-
-        if row is not None:
-            return row[0]
-        else:
-            cursor.execute(f"INSERT INTO {tableName} ({fieldName}) VALUES (?)", (value,))
-            self.conn.commit()
-            return cursor.lastrowid
-
-    # Добавление url в таблицу URLList
-    def addUrlToURLList(self, url):
-        url = str(url)
-        cursor = self.conn.cursor()
-        result = cursor.execute("SELECT URL FROM URLList WHERE URL=?; ", (url,)).fetchall()
         
-        if len(result) == 0:
-            cursor.execute("INSERT INTO URLList (URL) VALUES (?) ", (url,))
+        cursor.execute("SELECT rowId FROM URLList WHERE URL=?; ", (url,))
+        rowId_url = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT rowId FROM URLList WHERE URL=?; ", (href,))
+        rowId_href = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT rowId FROM linkBetweenURL WHERE fk_FromURL_Id=? AND fk_ToURL_Id=?", (rowId_url, rowId_href))
+        fk_linkId = cursor.fetchone()
+        for word in linkText:
+            cursor.execute("SELECT rowId FROM wordList WHERE word=?", (word, ))
+            word_id = cursor.fetchone()
+            if fk_linkId is not None and word_id is not None:
+                cursor.execute("INSERT INTO linkWord (fk_wordId, fk_linkId) VALUES (?, ?)", (word_id[0], fk_linkId[0]))
         self.conn.commit()
