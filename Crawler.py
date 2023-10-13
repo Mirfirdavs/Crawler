@@ -41,7 +41,11 @@ class Crawler:
             
                 rowId = cursor.execute("SELECT rowId FROM wordList WHERE word=?", (word,)).fetchone()
                 cursor.execute("INSERT INTO wordLocation (fk_wordId, fk_URLId, location) VALUES (?, ?, ?)", (rowId[0], result[0], index))
-        
+            else:
+                wordId = cursor.execute("SELECT rowId FROM wordList WHERE word=?", (word,)).fetchone()
+                rowId = cursor.execute("SELECT rowId FROM wordList WHERE word=?", (word,)).fetchone()
+                
+                cursor.execute("INSERT INTO wordLocation (fk_wordId, fk_URLId, location) VALUES (?, ?, ?)", (wordId[0], result[0], index))
         self.conn.commit()
 
 
@@ -60,12 +64,13 @@ class Crawler:
     # 4. Проиндексирован ли URL (проверка наличия URL в БД)
     def isIndexed(self, url):
         cursor = self.conn.cursor()
-        cursor.execute("SELECT fk_ToURL_Id FROM linkBetweenURL WHERE fk_ToURL_Id=?", (url,))
+        cursor.execute("SELECT fk_URLId FROM wordLocation WHERE fk_URLId=?", (url, ))
         result = cursor.fetchone()
+        #True если ссылка проиндексирована False если нет
         return result is not None
 
     # 5. Добавление ссылки с одной страницы на другую
-    def addLinkRef(self, urlFrom, urlTo, linkText):
+    def addLinkRef(self, urlFrom, urlTo):
         cursor = self.conn.cursor()
 
         # Получите идентификатор URl для страницы, с которой исходит ссылка
@@ -76,9 +81,11 @@ class Crawler:
         cursor.execute("SELECT rowId FROM URLList WHERE URL=?", (urlTo,))
         toId = cursor.fetchone()[0]
 
-        # Добавьте запись о ссылке
-        if not self.isIndexed(toId):
-            cursor.execute("INSERT INTO linkBetweenURL (fk_FromURL_Id, fk_ToURL_Id) VALUES (?, ?)", (fromId, toId))
+        # Проверка на повторения
+        checkToId = cursor.execute("SELECT fk_ToURL_Id FROM linkBetweenURL WHERE fk_ToURL_Id=?; ", (toId, )).fetchone()
+        
+        if checkToId is None:
+            cursor.execute("INSERT INTO linkBetweenURL (fk_FromURL_Id, fk_ToURL_Id) VALUES (?, ?) ", (fromId, toId))
         self.conn.commit()
 
     # 6. Непосредственно сам метод сбора данных.
@@ -93,6 +100,9 @@ class Crawler:
             # Вар.1. обход каждого url на текущей глубине
             for url in  urlList:
                 print(f"Индексируем  {url}")
+                if self.isIndexed(url):
+                    print("Ссылка уже проиндексирована")
+                    continue
                 try:
                     if url.endswith('/'):
                         url = url[:-1]
@@ -109,7 +119,11 @@ class Crawler:
                     listUnwantedItems = ['script', 'style', 'noscript']
                     for script in soup.find_all(listUnwantedItems):
                         script.decompose()
-
+                    
+                    # Индексирование аттр. Value
+                    input_tags = soup.find_all('input', {'value': True})
+                    self.addToAttrValue(input_tags, url)
+                    
                     # получить список тэгов <a> с текущей страницы
                     foundLinks = soup.find_all('a')
 
@@ -138,7 +152,7 @@ class Crawler:
 
                             # Извлечь текст
                             # Добавить ссылку в таблицу linkBetweenURL в базе данных
-                            self.addLinkRef(url, href, linkText)
+                            self.addLinkRef(url, href)
                             self.addToLinkWord(url, href, linkText)
                     
                 except Exception as e:
@@ -165,6 +179,7 @@ class Crawler:
         cursor.execute("""DROP TABLE IF EXISTS wordLocation""")
         cursor.execute("""DROP TABLE IF EXISTS linkBetweenURL""")
         cursor.execute("""DROP TABLE IF EXISTS linkWord""")
+        cursor.execute("""DROP TABLE IF EXISTS attrValue""")
 
         # Создаем таблицы
         cursor.execute('''
@@ -212,6 +227,16 @@ class Crawler:
             FOREIGN KEY(fk_linkId) REFERENCES linkBetweenURL (rowId)
             );
         ''')
+        
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS attrValue (
+            rowId INTEGER PRIMARY KEY,
+            fk_wordId INTEGER,
+            fk_URLId INTEGER,
+            FOREIGN KEY(fk_wordId) REFERENCES wordList (rowId),
+            FOREIGN KEY (fk_URLId) REFERENCES URLList (rowId)
+            );
+        """)
         self.conn.commit()
 
     # 8. Функция для добавления слов в таблицу linkWord
@@ -232,4 +257,20 @@ class Crawler:
             word_id = cursor.fetchone()
             if fk_linkId is not None and word_id is not None:
                 cursor.execute("INSERT INTO linkWord (fk_wordId, fk_linkId) VALUES (?, ?)", (word_id[0], fk_linkId[0]))
+        self.conn.commit()
+    
+    
+    def addToAttrValue(self, input_tags, url):
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT rowId FROM URLList WHERE URL=?; ", (url,))
+        rowId_url = cursor.fetchone()
+        
+        for input_tag in input_tags:
+            value = input_tag['value']
+            isWordInDB = cursor.execute("SELECT word FROM wordList WHERE word=?", (value,)).fetchone()
+            if isWordInDB is None:
+                cursor.execute("INSERT INTO wordList (word) VALUES (?)", (value,))
+            
+                rowId = cursor.execute("SELECT rowId FROM wordList WHERE word=?", (value,)).fetchone()
+                cursor.execute("INSERT INTO attrValue (fk_wordId, fk_URLId) VALUES (?, ?)", (rowId[0], rowId_url[0]))
         self.conn.commit()
