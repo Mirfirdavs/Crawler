@@ -3,6 +3,7 @@ from bs4 import BeautifulSoup
 import sqlite3
 import re
 import random
+from urllib.parse import urlparse
 
 
 class Crawler:
@@ -10,7 +11,31 @@ class Crawler:
     def __init__(self, dbFileName):
         print("Конструктор работает".center(70, '-'))
         self.conn=sqlite3.connect(dbFileName)
+        self.wordList_dict = {}
+        self.urlList_dct ={}
+        self.domainCounter = {}
 
+    def getInfo(self):
+        
+        cursor = self.conn.cursor()
+        list_of_keys = cursor.execute("""SELECT fk_FromURL_Id, COUNT(fk_ToURL_Id) AS link_count
+                                        FROM linkBetweenURL
+                                        GROUP by fk_FromURL_Id;
+                                        """).fetchall()
+        for key, value in list_of_keys:
+            self.urlList_dct[key] = value
+        
+        WL_dict = self.wordList_dict.copy()
+        UL_dict = self.urlList_dct.copy()
+        LBU_dict = self.urlList_dct.copy()
+        return (WL_dict, UL_dict, LBU_dict)
+    
+    def get_top_20_domain(self):
+        domains = self.domainCounter.copy()
+        domains = sorted(domains.items(), key=lambda x: x[1], reverse=True)
+        top_20_domain = dict(list(dict(domains).items())[:20])
+        return top_20_domain
+    
     # 0. Деструктор
     def __del__(self):
         print("Деструктор".center(70, '-'))
@@ -28,17 +53,24 @@ class Crawler:
     # 1. Индексирование одной страницы
     def addIndex(self, soup, url):
         url = str(url)
+        url_parts = url.split()
+        if len(url_parts)>=2:
+            domain = url_parts[2]
+            self.domenCounter[domain] = self.domenCounter.get(domain, 0) + 1
+        
         separatedWordList = self.getTextOnly(soup)
         
         cursor = self.conn.cursor()
         result = cursor.execute("SELECT rowId FROM URLList WHERE URL=?", (url,)).fetchone()
+        self.wordList_dict[result[0]] = 0
 
         # Добавьте каждое слово в таблицу wordLocation
         for index, word in enumerate(separatedWordList):
             isWordInDB = cursor.execute("SELECT word FROM wordList WHERE word=?", (word,)).fetchone()
             if isWordInDB is None:
                 cursor.execute("INSERT INTO wordList (word) VALUES (?)", (word,))
-            
+                self.wordList_dict[result[0]] += 1
+
                 rowId = cursor.execute("SELECT rowId FROM wordList WHERE word=?", (word,)).fetchone()
                 cursor.execute("INSERT INTO wordLocation (fk_wordId, fk_URLId, location) VALUES (?, ?, ?)", (rowId[0], result[0], index))
             else:
@@ -91,7 +123,7 @@ class Crawler:
     # 6. Непосредственно сам метод сбора данных.
     # Начиная с заданного списка страниц, выполняет поиск в ширину
     # до заданной глубины, индексируя все встречающиеся по пути страницы
-    def crawl(self, urlList, maxDepth=1):
+    def crawl(self, urlList, maxDepth=11):
         print("6. Обход страниц")
         the_depth = 2
         for currDepth in range(0, maxDepth):
@@ -143,7 +175,8 @@ class Crawler:
                                 href = href[:-1]
                             
                             # Добавить ссылку в список следующей глубины
-                            nextDepthURLs.append(href)
+                            if not href.endswith('.pdf'):
+                                nextDepthURLs.append(href)
                             # Добавление в табоицу URLList
                             self.addUrlToURLList(href)
 
@@ -159,7 +192,7 @@ class Crawler:
                     print(f"Ошибка при обработке {url}: {str(e)}")
                 print('Переход')
                 # Переход к следующей глубине
-            if len(nextDepthURLs) >= the_depth * 2:
+            if len(nextDepthURLs) >= the_depth * 3:
                 urlList = random.choices(nextDepthURLs, k=the_depth*2)
             else:
                 urlList = nextDepthURLs
@@ -258,7 +291,7 @@ class Crawler:
             if fk_linkId is not None and word_id is not None:
                 cursor.execute("INSERT INTO linkWord (fk_wordId, fk_linkId) VALUES (?, ?)", (word_id[0], fk_linkId[0]))
         self.conn.commit()
-    
+
     
     def addToAttrValue(self, input_tags, url):
         cursor = self.conn.cursor()
