@@ -12,17 +12,8 @@ crawler.crawl([
     #'https://www.nstu.ru/studies'
     ])
 
-crawler.wordList_list
-crawler.urlList_list
-crawler.wordloc_list
-
 get_top_20_domain = crawler.get_top_20_domain()
-#print(crawler.getInfo())
 print(get_top_20_domain)
-#for k, v in get_top_20_domain.items():
-#    print(v, k)
-
-#WL_dict, UL_dict, LBU_dict = crawler.getInfo()
 
 wl = V()
 

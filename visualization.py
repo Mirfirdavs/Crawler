@@ -13,7 +13,9 @@ class Visualization():
         plt.xlabel("Количество индексированных страниц") # ось абсцисс
         plt.ylabel("Количество уникальных слов") # ось ординат
         plt.grid()      # включение отображение сетки
-        plt.plot(x, y, 'o-')  # построение графика
+        plt.plot(x, y,
+                #'o-'
+                )  # построение графика
         plt.show()
     
     def second_graph(self, lst):
@@ -24,7 +26,9 @@ class Visualization():
         plt.xlabel("Количество индексированных страниц") # ось абсцисс
         plt.ylabel("Количество URL") # ось ординат
         plt.grid()      # включение отображение сетки
-        plt.plot(x, y, 'o-')  # построение графика
+        plt.plot(x, y,
+                #'o-'
+                )  # построение графика
         plt.show()
     
     def third_graph(self, lst):
@@ -35,6 +39,8 @@ class Visualization():
         plt.xlabel("Количество индексированных страниц") # ось абсцисс
         plt.ylabel("Количество слов") # ось ординат
         plt.grid()      # включение отображение сетки
-        plt.plot(x, y, 'o-')  # построение графика
+        plt.plot(x, y, 
+                #'o-'
+                )  # построение графика
         plt.show()
 
