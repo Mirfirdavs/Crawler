@@ -10,7 +10,18 @@ class Crawler:
     def __init__(self, dbFileName):
         print("Конструктор работает".center(70, '-'))
         self.conn=sqlite3.connect(dbFileName)
-
+        self.domainCounter = {}
+        
+        self.wordList_list  = list()
+        self.urlList_list   = list()
+        self.wordloc_list   = list()
+    
+    def get_top_20_domain(self):
+        domains = self.domainCounter.copy()
+        domains = sorted(domains.items(), key=lambda x: x[1], reverse=True)
+        top_20_domain = dict(list(dict(domains).items())[:20])
+        return top_20_domain
+    
     # 0. Деструктор
     def __del__(self):
         print("Деструктор".center(70, '-'))
@@ -19,11 +30,14 @@ class Crawler:
     # Добавление url в таблицу URLList
     def addUrlToURLList(self, url):
         url = str(url)
+        url_parts = url.split('/')
+        if len(url_parts)>=2:
+            domain = url_parts[2]
+            self.domainCounter[domain] = self.domainCounter.get(domain, 0) + 1
         cursor = self.conn.cursor()
         result = cursor.execute("SELECT URL FROM URLList WHERE URL=?; ", (url,)).fetchone()
         if result is None:
             cursor.execute("INSERT INTO URLList (URL) VALUES (?) ", (url,))
-        self.conn.commit()
     
     # 1. Индексирование одной страницы
     def addIndex(self, soup, url):
@@ -38,14 +52,9 @@ class Crawler:
             isWordInDB = cursor.execute("SELECT word FROM wordList WHERE word=?", (word,)).fetchone()
             if isWordInDB is None:
                 cursor.execute("INSERT INTO wordList (word) VALUES (?)", (word,))
-            
-                rowId = cursor.execute("SELECT rowId FROM wordList WHERE word=?", (word,)).fetchone()
-                cursor.execute("INSERT INTO wordLocation (fk_wordId, fk_URLId, location) VALUES (?, ?, ?)", (rowId[0], result[0], index))
-            else:
-                wordId = cursor.execute("SELECT rowId FROM wordList WHERE word=?", (word,)).fetchone()
-                rowId = cursor.execute("SELECT rowId FROM wordList WHERE word=?", (word,)).fetchone()
-                
-                cursor.execute("INSERT INTO wordLocation (fk_wordId, fk_URLId, location) VALUES (?, ?, ?)", (wordId[0], result[0], index))
+
+            wordId = cursor.execute("SELECT rowId FROM wordList WHERE word=?", (word,)).fetchone()
+            cursor.execute("INSERT INTO wordLocation (fk_wordId, fk_URLId, location) VALUES (?, ?, ?)", (wordId[0], result[0], index))
         self.conn.commit()
 
 
@@ -64,10 +73,14 @@ class Crawler:
     # 4. Проиндексирован ли URL (проверка наличия URL в БД)
     def isIndexed(self, url):
         cursor = self.conn.cursor()
-        cursor.execute("SELECT fk_URLId FROM wordLocation WHERE fk_URLId=?", (url, ))
-        result = cursor.fetchone()
+        url_id = cursor.execute("SELECT rowId FROM URLList WHERE URL=?", (url, )).fetchone()
+        if url_id is None:
+            return False
+        
+        url_id = url_id[0]
+        result = cursor.execute("SELECT rowId FROM wordLocation WHERE fk_URLId=?", (url_id, )).fetchone()
         #True если ссылка проиндексирована False если нет
-        return result is not None
+        return not (result is None)
 
     # 5. Добавление ссылки с одной страницы на другую
     def addLinkRef(self, urlFrom, urlTo):
@@ -82,34 +95,44 @@ class Crawler:
         toId = cursor.fetchone()[0]
 
         # Проверка на повторения
-        checkToId = cursor.execute("SELECT fk_ToURL_Id FROM linkBetweenURL WHERE fk_ToURL_Id=?; ", (toId, )).fetchone()
-        
-        if checkToId is None:
-            cursor.execute("INSERT INTO linkBetweenURL (fk_FromURL_Id, fk_ToURL_Id) VALUES (?, ?) ", (fromId, toId))
-        self.conn.commit()
+        #checkToId = cursor.execute("SELECT fk_ToURL_Id FROM linkBetweenURL WHERE fk_FromURL_Id=? and fk_ToURL_Id=? ; ", (fromId, toId, )).fetchone()
+
+        cursor.execute("INSERT INTO linkBetweenURL (fk_FromURL_Id, fk_ToURL_Id) VALUES (?, ?) ", (fromId, toId))
 
     # 6. Непосредственно сам метод сбора данных.
     # Начиная с заданного списка страниц, выполняет поиск в ширину
     # до заданной глубины, индексируя все встречающиеся по пути страницы
-    def crawl(self, urlList, maxDepth=1):
+    def crawl(self, urlList, maxDepth=30):
         print("6. Обход страниц")
-        the_depth = 2
+        COUNTER_PARSED_ULR = 0
         for currDepth in range(0, maxDepth):
             # Создаем список для хранения URL следующей глубины
             nextDepthURLs = []
             # Вар.1. обход каждого url на текущей глубине
             for url in  urlList:
+                cursor = self.conn.cursor()
+                if url.endswith('/'):
+                    url = url[:-1]
+                try:
+                    check = requests.get(url)
+                    if check.status_code != 200:
+                        continue
+                except:
+                    continue
+                self.addUrlToURLList(url)
+                
                 print(f"Индексируем  {url}")
                 if self.isIndexed(url):
                     print("Ссылка уже проиндексирована")
                     continue
                 try:
-                    if url.endswith('/'):
-                        url = url[:-1]
-                    self.addUrlToURLList(url)
                     
                     # получить HTML-код страницы по текущему url
-                    html_doc = requests.get(url).text
+                    http_answer = requests.get(url)
+                    if http_answer.status_code != 200:
+                        continue
+                    
+                    html_doc = http_answer.text
                     # использовать парсер для работа тегов
                     soup = BeautifulSoup(html_doc, "html.parser")
                     
@@ -124,12 +147,13 @@ class Crawler:
                     input_tags = soup.find_all('input', {'value': True})
                     self.addToAttrValue(input_tags, url)
                     
+
                     # получить список тэгов <a> с текущей страницы
                     foundLinks = soup.find_all('a')
 
                     for link in foundLinks:
                         href = link.get('href')
-                        if href and not href.startswith('#') and not href.startswith('mailto:'):
+                        if href and not href.startswith(('#', 'mailto:')) and href not in ('/ru', '/ru/') and not href.endswith(('.pdf', '.jpg', '.png')):
                             # Преобразовать относительные URL в абсолютные
                             if not href.startswith('http'):
                                 href = url + href
@@ -154,18 +178,33 @@ class Crawler:
                             # Добавить ссылку в таблицу linkBetweenURL в базе данных
                             self.addLinkRef(url, href)
                             self.addToLinkWord(url, href, linkText)
+                    # поличтить кол-во строк таблицы БД
+                    
+                    self.conn.commit()
+                    COUNTER_PARSED_ULR +=1
+                    
+                    resultwordLoc = cursor.execute("SELECT  count(*) FROM wordLocation;").fetchone()[0]
+                    resulturlList = cursor.execute("SELECT  count(*) FROM URLList;").fetchone()[0]
+                    resultwordList = cursor.execute("SELECT count(*) FROM wordList;").fetchone()[0]
+                    self.wordloc_list.append(  resultwordLoc) 
+                    self.urlList_list.append(  resulturlList) 
+                    self.wordList_list.append( resultwordList) 
                     
                 except Exception as e:
                     print(f"Ошибка при обработке {url}: {str(e)}")
-                print('Переход')
-                # Переход к следующей глубине
-            if len(nextDepthURLs) >= the_depth * 2:
-                urlList = random.choices(nextDepthURLs, k=the_depth*2)
+                print('Переход  НА СЛЕД url ')
+                
+                
+            print(' Переход к следующей глубине')
+            nextDepthURLs = list(set(nextDepthURLs))
+            if len(nextDepthURLs) >= (currDepth+2) * 2:
+                urlList = random.choices(nextDepthURLs, k=(currDepth+2)*2)
             else:
-                urlList = nextDepthURLs
-            print(f"Глубина: {the_depth}   Список:  {urlList}")
-            the_depth += 1
+                urlList = nextDepthURLs[:]
+            print(f"Глубина: {currDepth+2}   Список:  {urlList}")
+            nextDepthURLs.clear()
         print("Завершено.")
+        print('Количество проиндексированных страниц: ', COUNTER_PARSED_ULR)
 
     # 7. Инициализация таблиц в БД
     def initDB(self, ):
@@ -257,8 +296,7 @@ class Crawler:
             word_id = cursor.fetchone()
             if fk_linkId is not None and word_id is not None:
                 cursor.execute("INSERT INTO linkWord (fk_wordId, fk_linkId) VALUES (?, ?)", (word_id[0], fk_linkId[0]))
-        self.conn.commit()
-    
+
     
     def addToAttrValue(self, input_tags, url):
         cursor = self.conn.cursor()
