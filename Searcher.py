@@ -210,76 +210,69 @@ class Searcher:
     def calculatePageRank(self, iterations=5):
         # Подготовка БД ------------------------------------------
         # стираем текущее содержимое таблицы PageRank
-        self.con.execute('DROP TABLE IF EXISTS pagerank')
-        self.con.execute("""CREATE TABLE  IF NOT EXISTS  pagerank(
+        self.conn.execute('DROP TABLE IF EXISTS pagerank')
+        self.conn.execute("""CREATE TABLE  IF NOT EXISTS  pagerank(
                                 rowid INTEGER PRIMARY KEY AUTOINCREMENT,
                                 urlid INTEGER,
                                 score REAL
                             );""")
 
-
         # Для некоторых столбцов в таблицах БД укажем команду создания объекта "INDEX" для ускорения поиска в БД
-        self.con.execute("DROP INDEX   IF EXISTS wordidx;")
-        self.con.execute("DROP INDEX   IF EXISTS urlidx;")
-        self.con.execute("DROP INDEX   IF EXISTS wordurlidx;")
-        self.con.execute("DROP INDEX   IF EXISTS urltoidx;")
-        self.con.execute("DROP INDEX   IF EXISTS urlfromidx;")
-        self.con.execute('CREATE INDEX IF NOT EXISTS wordidx       ON wordlist(word)')
-        self.con.execute('CREATE INDEX IF NOT EXISTS urlidx        ON urllist(url)')
-        self.con.execute('CREATE INDEX IF NOT EXISTS wordurlidx    ON wordlocation(wordid)')
-        self.con.execute('CREATE INDEX IF NOT EXISTS urltoidx      ON linkbeetwenurl(toid)')
-        self.con.execute('CREATE INDEX IF NOT EXISTS urlfromidx    ON linkbeetwenurl(fromid)')
-        self.con.execute("DROP INDEX   IF EXISTS rankurlididx;")
-        self.con.execute('CREATE INDEX IF NOT EXISTS rankurlididx  ON pagerank(urlid)')
-        self.con.execute("REINDEX wordidx;")
-        self.con.execute("REINDEX urlidx;")
-        self.con.execute("REINDEX wordurlidx;")
-        self.con.execute("REINDEX urltoidx;")
-        self.con.execute("REINDEX urlfromidx;")
-        self.con.execute("REINDEX rankurlididx;")
+        self.conn.execute("DROP INDEX   IF EXISTS wordidx;")
+        self.conn.execute("DROP INDEX   IF EXISTS urlidx;")
+        self.conn.execute("DROP INDEX   IF EXISTS wordurlidx;")
+        self.conn.execute("DROP INDEX   IF EXISTS urltoidx;")
+        self.conn.execute("DROP INDEX   IF EXISTS urlfromidx;")
+        self.conn.execute('CREATE INDEX IF NOT EXISTS wordidx       ON wordlist(word)')
+        self.conn.execute('CREATE INDEX IF NOT EXISTS urlidx        ON urllist(url)')
+        self.conn.execute('CREATE INDEX IF NOT EXISTS wordurlidx    ON wordlocation(fk_wordid)')
+        self.conn.execute('CREATE INDEX IF NOT EXISTS urltoidx      ON linkbetweenurl(fk_tourl_id)')
+        self.conn.execute('CREATE INDEX IF NOT EXISTS urlfromidx    ON linkbetweenurl(fk_fromurl_id)')
+        self.conn.execute("DROP INDEX   IF EXISTS rankurlididx;")
+        self.conn.execute('CREATE INDEX IF NOT EXISTS rankurlididx  ON pagerank(urlid)')
+        self.conn.execute("REINDEX wordidx;")
+        self.conn.execute("REINDEX urlidx;")
+        self.conn.execute("REINDEX wordurlidx;")
+        self.conn.execute("REINDEX urltoidx;")
+        self.conn.execute("REINDEX urlfromidx;")
+        self.conn.execute("REINDEX rankurlididx;")
 
-
-
-        # в начальный момент ранг для каждого URL равен 1
-        self.con.execute('INSERT INTO pagerank (urlid, score) SELECT rowid, 1.0 FROM urllist')
+        self.conn.execute('INSERT INTO pagerank (urlid, score) SELECT rowid, 1.0 FROM urllist')
         self.dbcommit()
 
-
-        # Цикл Вычисление PageRank в несколько итераций
+        print("Page rank:")
         for i in range(iterations):
-            print("Итерация %d" % (i))
+            print(f"Iteration {i}")
 
+            all_url_ids = self.conn.execute('SELECT rowid FROM urllist').fetchall()
+            new_ranks = {}
 
-            # Цикл для обхода каждого  urlid адреса в urllist БД
+            for (url_id,) in all_url_ids:
+                page_rank = 0.15
 
-                #назначить коэфф pr = 0.15
+                links_to_page = self.conn.execute('SELECT DISTINCT fk_FromURL_Id FROM linkBetweenURL WHERE fk_ToURL_Id = ?', (url_id,)).fetchall()
 
+                for (linking_id,) in links_to_page:
+                    linking_page_rank = self.conn.execute('SELECT score FROM pagerank WHERE urlid = ?', (linking_id,)).fetchone()[0]
+                    linking_total_links = self.conn.execute('SELECT count(*) FROM linkBetweenURL WHERE fk_FromURL_Id = ?', (linking_id,)).fetchone()[0]
+                    page_rank += 0.85 * (linking_page_rank / linking_total_links)
 
-                # В цикле обходим все страницы, ссылающиеся на данную urlid
-                # SELECT DISTINCT fromid FROM linkbeetwenurl  -- DISTINCT выбрать уникальные значения fromid
+                new_ranks[url_id] = page_rank
 
+            for url_id, page_rank in new_ranks.items():
+                self.conn.execute('UPDATE pagerank SET score = ? WHERE urlid = ?', (page_rank, url_id))
 
-                    # Находим ранг ссылающейся страницы linkingpr. выполнить SQL-зарпрос
+            self.conn.commit()
 
-
-                    # Находим общее число ссылок на ссылающейся странице linkingcount. выполнить SQL-зарпрос
-        #SELECT count (*)
-        #FROM linkbeetwenurl
-        #WHERE  fromid = 502
-#
-                    # Придавить к pr вычесленный результат для текущего узла
-
-                # выполнить SQL-зарпрос для обновления значения  score в таблице pagerank БД
-        self.con.execute('UPDATE pagerank SET score=%f WHERE urlid=%d' % (pr, urlid))
-
-        self.dbcommit()
-
-    # Вывод результата pagerank
     def pagerankScore(self, rows):
-        return None
-        # получить значения pagerank
-        # нормализовать отностительно максимума
-        return normalizedscores
+        page_ranks = [self.conn.execute('SELECT score FROM pagerank WHERE urlid = ?', (row,)).fetchone()[0] for row in rows]
+
+        max_rank = max(page_ranks)
+
+        normalized_scores = [float(rank) / max_rank for rank in page_ranks]
+
+        return normalized_scores
+
 
 # ------------------------------------------
 def main():
