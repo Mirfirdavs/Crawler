@@ -245,32 +245,30 @@ class Searcher:
         self.dbcommit()
 
 
-        # Цикл Вычисление PageRank в несколько итераций  
+        # Цикл Вычисление PageRank в несколько итераций
         for i in range(iterations):
             print("Итерация %d" % (i))
 
 
             # Цикл для обхода каждого  urlid адреса в urllist БД
-            
+
                 #назначить коэфф pr = 0.15
-                
+
 
                 # В цикле обходим все страницы, ссылающиеся на данную urlid
                 # SELECT DISTINCT fromid FROM linkbeetwenurl  -- DISTINCT выбрать уникальные значения fromid
-                
+
 
                     # Находим ранг ссылающейся страницы linkingpr. выполнить SQL-зарпрос
-                    
+
 
                     # Находим общее число ссылок на ссылающейся странице linkingcount. выполнить SQL-зарпрос
-        #SELECT count (*) 
+        #SELECT count (*)
         #FROM linkbeetwenurl
         #WHERE  fromid = 502
 #
-                    
-                    
                     # Придавить к pr вычесленный результат для текущего узла
-                    
+
                 # выполнить SQL-зарпрос для обновления значения  score в таблице pagerank БД
         self.con.execute('UPDATE pagerank SET score=%f WHERE urlid=%d' % (pr, urlid))
 
