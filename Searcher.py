@@ -61,12 +61,11 @@ class Searcher:
         """
 
         # Разбить поисковый запрос на слова по пробелам
-        queryString = queryString.lower()
-        wordsList = queryString.split(' ')
+        wordsList = queryString.split()
 
         # получить идентификаторы искомых слов
         wordsidList = self.getWordsIds(queryString)
-    
+
         #Созать переменную для полного SQL-запроса
         sqlFullQuery = """"""
 
@@ -75,20 +74,19 @@ class Searcher:
         sqlpart_Join = list() # INNER JOIN
         sqlpart_Condition = list() # условия WHERE
 
-
         #Конструктор SQL-запроса (заполнение обязательной и дополнительных частей)
         #обход в цикле каждого искомого слова и добавлене в SQL-запрос соответствующих частей
-        for wordIndex in range(0,len(wordsList)):
+        for wordIndex in range(0, len(wordsList)):
         
             # Получить идентификатор слова
             wordID = wordsidList[wordIndex]
 
             if wordIndex ==0:
                 # обязательная часть для первого слова
-                sqlpart_Name.append("""w0.urlid    urlid  --идентификатор url-адреса""")
+                sqlpart_Name.append("""w0.fk_URLId    fk_URLId  --идентификатор url-адреса""")
                 sqlpart_Name.append("""   , w0.location w0_loc --положение первого искомого слова""")
 
-                sqlpart_Condition.append("""WHERE w0.wordid={}     -- совпадение w0 с первым словом """.format(wordID))
+                sqlpart_Condition.append("""WHERE w0.fk_wordId={}     -- совпадение w0 с первым словом """.format(wordID))
 
             else:
                 # Дополнительная часть для 2,3,.. искомых слов
@@ -97,13 +95,13 @@ class Searcher:
                     # Проверка, если текущее слово - второе и более
 
                     # Добавить в имена столбцов
-                    sqlpart_Name.append(""" , w{}.location w{}_loc --положение следующего искомого слова""".format(wordIndex,wordIndex))
+                    sqlpart_Name.append(""" , w{}.location w{}_loc --положение следующего искомого слова""".format(wordIndex, wordIndex))
 
                     #Добавить в sql INNER JOIN
                     sqlpart_Join.append("""INNER JOIN wordlocation w{}  -- назначим псевдоним w{} для второй из соединяемых таблиц
-                        on w0.urlid=w{}.urlid -- условие объединения""".format(wordIndex, wordIndex, wordIndex))
+                        on w0.fk_URLId=w{}.fk_URLId -- условие объединения""".format(wordIndex, wordIndex, wordIndex))
                     # Добавить в sql ограничивающее условие
-                    sqlpart_Condition.append("""  AND w{}.wordid={} -- совпадение w{}... с cоответсвующим словом """.format(wordIndex, wordID, wordIndex ))
+                    sqlpart_Condition.append("""  AND w{}.fk_wordId={} -- совпадение w{}... с cоответсвующим словом """.format(wordIndex, wordID, wordIndex ))
                     pass
             pass
         
@@ -138,17 +136,177 @@ class Searcher:
         print(sqlFullQuery)
         cur = self.conn.execute(sqlFullQuery)
         rows = [row for row in cur]
-
         return rows, wordsidList
+
+
+    def normalizeScores(self, scores, smallIsBetter=0):
+        resultDict = dict() # словарь с результатом
+
+        vsmall = 0.00001  # создать переменную vsmall - малая величина, вместо деления на 0
+        minscore = min(scores.values())  # получить минимум
+        maxscore = max(scores.values())  # получить максимум
+        # перебор каждой пары ключ значение
+        for (key, val) in scores.items():
+
+            if smallIsBetter:
+                # Режим МЕНЬШЕ вх. значение => ЛУЧШЕ
+                # ранг нормализованный = мин. / (тек.значение  или малую величину)
+                resultDict[key] = float(minscore) / max(vsmall, val)
+            else:
+                # Режим БОЛЬШЕ  вх. значение => ЛУЧШЕ вычислить макс и разделить каждое на макс
+                # вычисление ранга как доли от макс.
+                # ранг нормализованный = тек. значения / макс.
+                resultDict[key] = float(val) / maxscore
+
+        return resultDict
+
+    # Ранжирование. Содержимое. 2. Расположение в документе.
+    def locationScore(self, rowsLoc):
+        """
+        Расчет минимального расстояния от начала страницы у комбинации искомых слов
+        :param rows: Список вхождений: urlId, loc_q1, loc_q2, .. слов из поискового запроса "q1 q2 ..." (на основе результата getmatchrows ())
+        :return: словарь {UrlId1: мин. расстояния от начала для комбинации, UrlId2: мин. расстояния от начала для комбинации, }
+        """
+        locationsDict=0
+
+        # Создать locationsDict - словарь с расположением от начала страницы упоминаний/комбинаций искомых слов
+
+        # поместить в словарь все ключи urlid с начальным значением сумм расстояний от начала страницы "1000000"
+
+        # Для каждой строки-комбинации искомых слов
+            # - получить все позиции искомых слов ( в строке-комбинации (urlId, loc_q1, loc_q2, .. ) взять все кроме нулевого)
+
+            # вычислить Сумму дистанций каждого слова от начала страницы
+
+            #Получить urlid страницы
+
+            # Проверка, является ли найденная комбинация слов ближе к началу, чем предыдущие
+
+        # передать словарь дистанций в функцию нормализации, режим "чем больше, тем лучше")
+        return self.normalizeScores(locationsDict, smallIsBetter=1)
+
+    def geturlname(self, id):
+        """
+        Получает из БД текстовое поле url-адреса по указанному urlid
+        :param id: целочисленный urlid
+        :return: строка с соответствующим url
+        """
+        # сформировать SQL-запрос вида SELECT url FROM urllist WHERE rowid=
+        # выполнить запрос в БД
+        # извлечь результат - строковый url и вернуть его
+        return "http://some-page.ru"
+
+    def getSortedList(self, queryString):
+        """
+        На поисковый запрос формирует список URL, вычисляет ранги, выводит в отсортированном порядке
+        :param queryString:  поисковый запрос
+        :return:
+        """
+
+        # получить rowsLoc и wordids от getMatchRows(queryString)
+        # rowsLoc - Список вхождений: urlId, loc_q1, loc_q2, .. слов из поискового запроса "q1 q2 ..."
+        # wordids - Список wordids.rowid слов поискового запроса
+
+
+        # Получить m1Scores - словарь {id URL страниц где встретились искомые слова: вычисленный нормализованный РАНГ}
+        # как результат вычисления одной из метрик
+
+        #Создать список для последующей сортировки рангов и url-адресов
+        rankedScoresList = list()
+        for url, score in m1Scores.items():
+            pair = (score, url)
+            rankedScoresList.append( pair )
+
+        # Сортировка из словаря по убыванию
+        rankedScoresList.sort(reverse=True)
+
+        # Вывод первых N Результатов
+        print("score, urlid, geturlname")
+        for (score, urlid) in rankedScoresList[0:10]:
+            print ( "{:.2f} {:>5}  {}".format ( score, urlid, self.geturlname(urlid)))
+
+    def calculatePageRank(self, iterations=5):
+        # Подготовка БД ------------------------------------------
+        # стираем текущее содержимое таблицы PageRank
+        self.con.execute('DROP TABLE IF EXISTS pagerank')
+        self.con.execute("""CREATE TABLE  IF NOT EXISTS  pagerank(
+                                rowid INTEGER PRIMARY KEY AUTOINCREMENT,
+                                urlid INTEGER,
+                                score REAL
+                            );""")
+
+
+        # Для некоторых столбцов в таблицах БД укажем команду создания объекта "INDEX" для ускорения поиска в БД
+        self.con.execute("DROP INDEX   IF EXISTS wordidx;")
+        self.con.execute("DROP INDEX   IF EXISTS urlidx;")
+        self.con.execute("DROP INDEX   IF EXISTS wordurlidx;")
+        self.con.execute("DROP INDEX   IF EXISTS urltoidx;")
+        self.con.execute("DROP INDEX   IF EXISTS urlfromidx;")
+        self.con.execute('CREATE INDEX IF NOT EXISTS wordidx       ON wordlist(word)')
+        self.con.execute('CREATE INDEX IF NOT EXISTS urlidx        ON urllist(url)')
+        self.con.execute('CREATE INDEX IF NOT EXISTS wordurlidx    ON wordlocation(wordid)')
+        self.con.execute('CREATE INDEX IF NOT EXISTS urltoidx      ON linkbeetwenurl(toid)')
+        self.con.execute('CREATE INDEX IF NOT EXISTS urlfromidx    ON linkbeetwenurl(fromid)')
+        self.con.execute("DROP INDEX   IF EXISTS rankurlididx;")
+        self.con.execute('CREATE INDEX IF NOT EXISTS rankurlididx  ON pagerank(urlid)')
+        self.con.execute("REINDEX wordidx;")
+        self.con.execute("REINDEX urlidx;")
+        self.con.execute("REINDEX wordurlidx;")
+        self.con.execute("REINDEX urltoidx;")
+        self.con.execute("REINDEX urlfromidx;")
+        self.con.execute("REINDEX rankurlididx;")
+
+
+
+        # в начальный момент ранг для каждого URL равен 1
+        self.con.execute('INSERT INTO pagerank (urlid, score) SELECT rowid, 1.0 FROM urllist')
+        self.dbcommit()
+
+
+        # Цикл Вычисление PageRank в несколько итераций  
+        for i in range(iterations):
+            print("Итерация %d" % (i))
+
+
+            # Цикл для обхода каждого  urlid адреса в urllist БД
+            
+                #назначить коэфф pr = 0.15
+                
+
+                # В цикле обходим все страницы, ссылающиеся на данную urlid
+                # SELECT DISTINCT fromid FROM linkbeetwenurl  -- DISTINCT выбрать уникальные значения fromid
+                
+
+                    # Находим ранг ссылающейся страницы linkingpr. выполнить SQL-зарпрос
+                    
+
+                    # Находим общее число ссылок на ссылающейся странице linkingcount. выполнить SQL-зарпрос
+        #SELECT count (*) 
+        #FROM linkbeetwenurl
+        #WHERE  fromid = 502
+#
+                    
+                    
+                    # Придавить к pr вычесленный результат для текущего узла
+                    
+                # выполнить SQL-зарпрос для обновления значения  score в таблице pagerank БД
+                self.con.execute('UPDATE pagerank SET score=%f WHERE urlid=%d' % (pr, urlid))
+
+        self.dbcommit()
+
+    # Вывод результата pagerank
+    def pagerankScore(self, rows):
+        # получить значения pagerank
+        # нормализовать отностительно максимума
+        return normalizedscores
 
 # ------------------------------------------
 def main():
     """ основная функция main() """
-    mySeacher = Seacher("dbfilename.db")
+    mySearcher = Searcher("dbfilename.db")
     
     mySearchQuery = "на мы"
-    rowsLoc, wordsidList = \
-        mySeacher.getMatchRows(mySearchQuery)
+    rowsLoc, wordsidList = mySearcher.getMatchRows(mySearchQuery)
 
     print("-----------------------")
     print (mySearchQuery)
