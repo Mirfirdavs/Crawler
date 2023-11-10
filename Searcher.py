@@ -6,16 +6,19 @@ class Searcher:
         """ Зафиксировать изменения в БД """
         self.conn.commit()
 
+
     def __init__(self, dbFileName):
         """  0. Конструктор """
         # открыть "соединение" получить объект "сonnection" для работы с БД
         self.conn = sqlite3.connect(dbFileName)
 
+
     def __del__(self):
         """ 0. Деструктор  """
         # закрыть соединение с БД
         self.conn.close()
-    
+
+
     def getWordsIds(self, queryString):
         """
         Получение идентификаторов для каждого слова в queryString
@@ -23,35 +26,24 @@ class Searcher:
         :return: список wordlist.rowid искомых слов
         """
 
-        # Разделить на отдельные искомые слова
         queryWordsList = queryString.split()
-
-        # список для хранения результата
         rowidList = list()
 
         # Для каждого искомого слова
         for word in queryWordsList:
-            # Сформировать sql-запрос для получения rowid слова, указано ограничение на кол-во возвращаемых результатов (LIMIT 1)
             sql = "SELECT rowid FROM wordlist WHERE word =\"{}\" LIMIT 1; ".format(word)
-
-            # Выполнить sql-запрос. В качестве результата ожидаем строки содержащие целочисленный идентификатор rowid
             result_row = self.conn.execute(sql ).fetchone()
-
-
-            # Если слово было найдено и rowid получен
+            
             if result_row != None:
-                # Искомое rowid является элементом строки ответа от БД (особенность получаемого результата)
                 word_rowid = result_row[0]
-
-                # поместить rowid в список результата
+                
                 rowidList.append(word_rowid)
                 print("  ", word, word_rowid)
             else:
-                # в случае, если слово не найдено приостановить работу (генерация исключения)
                 raise Exception("Одно из слов поискового запроса не найдено:" + word)
-
         # вернуть список идентификаторов
         return rowidList
+
 
     def getMatchRows(self, queryString):
         """
@@ -59,16 +51,13 @@ class Searcher:
         :param queryString: поисковый запрос пользователя
         :return: 1) список вхождений формата (urlId, loc_q1, loc_q2, ...) loc_qN позиция на странице Nго слова из поискового запроса  "q1 q2 ..."
         """
-
-        # Разбить поисковый запрос на слова по пробелам
+        
         wordsList = queryString.split()
-
         # получить идентификаторы искомых слов
         wordsidList = self.getWordsIds(queryString)
 
         #Созать переменную для полного SQL-запроса
         sqlFullQuery = """"""
-
         # Созать объекты-списки для дополнений SQL-запроса
         sqlpart_Name = list() # имена столбцов
         sqlpart_Join = list() # INNER JOIN
@@ -77,7 +66,6 @@ class Searcher:
         #Конструктор SQL-запроса (заполнение обязательной и дополнительных частей)
         #обход в цикле каждого искомого слова и добавлене в SQL-запрос соответствующих частей
         for wordIndex in range(0, len(wordsList)):
-        
             # Получить идентификатор слова
             wordID = wordsidList[wordIndex]
 
@@ -90,10 +78,8 @@ class Searcher:
 
             else:
                 # Дополнительная часть для 2,3,.. искомых слов
-
                 if len(wordsList)>=2:
                     # Проверка, если текущее слово - второе и более
-
                     # Добавить в имена столбцов
                     sqlpart_Name.append(""" , w{}.location w{}_loc --положение следующего искомого слова""".format(wordIndex, wordIndex))
 
@@ -104,11 +90,8 @@ class Searcher:
                     sqlpart_Condition.append("""  AND w{}.fk_wordId={} -- совпадение w{}... с cоответсвующим словом """.format(wordIndex, wordID, wordIndex ))
                     pass
             pass
-        
-        
-        # Объеднение запроса из отдельных частей
 
-        #Команда SELECT
+        # Объеднение запроса из отдельных частей
         sqlFullQuery += "SELECT "
 
         #Все имена столбцов для вывода
@@ -129,8 +112,6 @@ class Searcher:
         for sqlpart in sqlpart_Condition:
             sqlFullQuery += "\n"
             sqlFullQuery += sqlpart
-
-
 
         # Выполнить SQL-запроса и извлеч ответ от БД
         print(sqlFullQuery)
@@ -167,23 +148,21 @@ class Searcher:
         :param rows: Список вхождений: urlId, loc_q1, loc_q2, .. слов из поискового запроса "q1 q2 ..." (на основе результата getmatchrows ())
         :return: словарь {UrlId1: мин. расстояния от начала для комбинации, UrlId2: мин. расстояния от начала для комбинации, }
         """
-        locationsDict=0
 
         # Создать locationsDict - словарь с расположением от начала страницы упоминаний/комбинаций искомых слов
+        locationsDict = dict()
 
-        # поместить в словарь все ключи urlid с начальным значением сумм расстояний от начала страницы "1000000"
-
-        # Для каждой строки-комбинации искомых слов
-            # - получить все позиции искомых слов ( в строке-комбинации (urlId, loc_q1, loc_q2, .. ) взять все кроме нулевого)
-
-            # вычислить Сумму дистанций каждого слова от начала страницы
-
-            #Получить urlid страницы
-
-            # Проверка, является ли найденная комбинация слов ближе к началу, чем предыдущие
-
-        # передать словарь дистанций в функцию нормализации, режим "чем больше, тем лучше")
-        return self.normalizeScores(locationsDict, smallIsBetter=1)
+        for row in rowsLoc:
+            urlId = row[0]     # Извлечение urlId из строки
+            locations = row[1:]
+            locationsDict.setdefault(urlId, 1_000_000)
+            
+            #Вычисление суммы дистанций каждого слова от начала страницы
+            total_distance = sum(locations)
+            
+            locationsDict[urlId] = min(total_distance, locationsDict[urlId])
+        
+        return self.normalizeScores(locationsDict, smallIsBetter=0)
 
     def geturlname(self, id):
         """
@@ -191,10 +170,13 @@ class Searcher:
         :param id: целочисленный urlid
         :return: строка с соответствующим url
         """
-        # сформировать SQL-запрос вида SELECT url FROM urllist WHERE rowid=
-        # выполнить запрос в БД
-        # извлечь результат - строковый url и вернуть его
-        return "http://some-page.ru"
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT url FROM urlList WHERE rowid=?", (id, ))
+        url = cursor.fetchone()
+        
+        if url is not None:
+            return url[0]
+        return None
 
     def getSortedList(self, queryString):
         """
@@ -202,12 +184,12 @@ class Searcher:
         :param queryString:  поисковый запрос
         :return:
         """
-
+        rowsLoc, wordids = self.getMatchRows(queryString=queryString)
         # получить rowsLoc и wordids от getMatchRows(queryString)
         # rowsLoc - Список вхождений: urlId, loc_q1, loc_q2, .. слов из поискового запроса "q1 q2 ..."
         # wordids - Список wordids.rowid слов поискового запроса
 
-
+        m1Scores = self.locationScore(rowsLoc)
         # Получить m1Scores - словарь {id URL страниц где встретились искомые слова: вычисленный нормализованный РАНГ}
         # как результат вычисления одной из метрик
 
@@ -290,12 +272,13 @@ class Searcher:
                     # Придавить к pr вычесленный результат для текущего узла
                     
                 # выполнить SQL-зарпрос для обновления значения  score в таблице pagerank БД
-                self.con.execute('UPDATE pagerank SET score=%f WHERE urlid=%d' % (pr, urlid))
+        self.con.execute('UPDATE pagerank SET score=%f WHERE urlid=%d' % (pr, urlid))
 
         self.dbcommit()
 
     # Вывод результата pagerank
     def pagerankScore(self, rows):
+        return None
         # получить значения pagerank
         # нормализовать отностительно максимума
         return normalizedscores
@@ -305,14 +288,17 @@ def main():
     """ основная функция main() """
     mySearcher = Searcher("dbfilename.db")
     
-    mySearchQuery = "на мы"
+    mySearchQuery = "of for"
     rowsLoc, wordsidList = mySearcher.getMatchRows(mySearchQuery)
 
     print("-----------------------")
-    print (mySearchQuery)
-    print (wordsidList)
-    for location in rowsLoc:
-        print(location)
+    #print (mySearchQuery)
+    #print (wordsidList)
+    #for location in rowsLoc:
+    #    print(location)
+    
+    #print(mySearcher.locationScore(rowsLoc=rowsLoc))
+    print(mySearcher.getSortedList(mySearchQuery))
 
 
 # ------------------------------------------
