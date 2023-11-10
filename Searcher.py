@@ -291,6 +291,7 @@ def main():
     #print(mySearcher.locationScore(rowsLoc=rowsLoc))
     print(mySearcher.getSortedList(mySearchQuery))
 
+    mySearcher.calculatePageRank()
 
 # ------------------------------------------
 main()
