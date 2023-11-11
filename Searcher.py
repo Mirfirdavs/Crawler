@@ -31,7 +31,7 @@ class Searcher:
 
         # Для каждого искомого слова
         for word in queryWordsList:
-            sql = "SELECT rowid FROM wordlist WHERE word =\"{}\" LIMIT 1; ".format(word)
+            sql = "SELECT rowId FROM wordlist WHERE word =\"{}\" LIMIT 1; ".format(word)
             result_row = self.conn.execute(sql ).fetchone()
             
             if result_row != None:
@@ -162,7 +162,7 @@ class Searcher:
             
             locationsDict[urlId] = min(total_distance, locationsDict[urlId])
         
-        return self.normalizeScores(locationsDict, smallIsBetter=0)
+        return self.normalizeScores(locationsDict, smallIsBetter=1)
 
     def geturlname(self, id):
         """
@@ -171,7 +171,7 @@ class Searcher:
         :return: строка с соответствующим url
         """
         cursor = self.conn.cursor()
-        cursor.execute("SELECT url FROM urlList WHERE rowid=?", (id, ))
+        cursor.execute("SELECT url FROM urlList WHERE rowId=?", (id, ))
         url = cursor.fetchone()
         
         if url is not None:
@@ -210,41 +210,41 @@ class Searcher:
     def calculatePageRank(self, iterations=5):
         # Подготовка БД ------------------------------------------
         # стираем текущее содержимое таблицы PageRank
-        self.conn.execute('DROP TABLE IF EXISTS pagerank')
-        self.conn.execute("""CREATE TABLE  IF NOT EXISTS  pagerank(
-                                rowid INTEGER PRIMARY KEY AUTOINCREMENT,
-                                urlid INTEGER,
+        self.conn.execute('DROP TABLE IF EXISTS pageRank')
+        self.conn.execute("""CREATE TABLE  IF NOT EXISTS  pageRank(
+                                rowId INTEGER PRIMARY KEY AUTOINCREMENT,
+                                urlId INTEGER,
                                 score REAL
                             );""")
 
         # Для некоторых столбцов в таблицах БД укажем команду создания объекта "INDEX" для ускорения поиска в БД
-        self.conn.execute("DROP INDEX   IF EXISTS wordidx;")
-        self.conn.execute("DROP INDEX   IF EXISTS urlidx;")
-        self.conn.execute("DROP INDEX   IF EXISTS wordurlidx;")
-        self.conn.execute("DROP INDEX   IF EXISTS urltoidx;")
-        self.conn.execute("DROP INDEX   IF EXISTS urlfromidx;")
-        self.conn.execute('CREATE INDEX IF NOT EXISTS wordidx       ON wordlist(word)')
-        self.conn.execute('CREATE INDEX IF NOT EXISTS urlidx        ON urllist(url)')
-        self.conn.execute('CREATE INDEX IF NOT EXISTS wordurlidx    ON wordlocation(fk_wordid)')
-        self.conn.execute('CREATE INDEX IF NOT EXISTS urltoidx      ON linkbetweenurl(fk_tourl_id)')
-        self.conn.execute('CREATE INDEX IF NOT EXISTS urlfromidx    ON linkbetweenurl(fk_fromurl_id)')
-        self.conn.execute("DROP INDEX   IF EXISTS rankurlididx;")
-        self.conn.execute('CREATE INDEX IF NOT EXISTS rankurlididx  ON pagerank(urlid)')
-        self.conn.execute("REINDEX wordidx;")
-        self.conn.execute("REINDEX urlidx;")
-        self.conn.execute("REINDEX wordurlidx;")
-        self.conn.execute("REINDEX urltoidx;")
-        self.conn.execute("REINDEX urlfromidx;")
-        self.conn.execute("REINDEX rankurlididx;")
+        self.conn.execute("DROP INDEX   IF EXISTS word_Idx;")
+        self.conn.execute("DROP INDEX   IF EXISTS url_Idx;")
+        self.conn.execute("DROP INDEX   IF EXISTS word_Url_Idx;")
+        self.conn.execute("DROP INDEX   IF EXISTS url_To_Idx;")
+        self.conn.execute("DROP INDEX   IF EXISTS url_From_Idx;")
+        self.conn.execute('CREATE INDEX IF NOT EXISTS word_Idx       ON wordList(word)')
+        self.conn.execute('CREATE INDEX IF NOT EXISTS url_Idx        ON URLList(URL)')
+        self.conn.execute('CREATE INDEX IF NOT EXISTS word_Url_Idx    ON wordLocation(fk_wordId)')
+        self.conn.execute('CREATE INDEX IF NOT EXISTS url_To_Idx      ON linkBetweenURL(fk_ToURL_Id)')
+        self.conn.execute('CREATE INDEX IF NOT EXISTS url_From_Idx    ON linkBetweenURL(fk_FromURL_Id)')
+        self.conn.execute("DROP INDEX   IF EXISTS rank_Url_IdIdx;")
+        self.conn.execute('CREATE INDEX IF NOT EXISTS rank_Url_IdIdx  ON pagerank(urlId)')
+        self.conn.execute("REINDEX word_Idx;")
+        self.conn.execute("REINDEX url_Idx;")
+        self.conn.execute("REINDEX word_Url_Idx;")
+        self.conn.execute("REINDEX url_To_Idx;")
+        self.conn.execute("REINDEX url_From_Idx;")
+        self.conn.execute("REINDEX rank_Url_IdIdx;")
 
-        self.conn.execute('INSERT INTO pagerank (urlid, score) SELECT rowid, 1.0 FROM urllist')
+        self.conn.execute('INSERT INTO pageRank (urlId, score) SELECT rowId, 1.0 FROM URLList')
         self.dbcommit()
 
         print("Page rank:")
         for i in range(iterations):
             print(f"Iteration {i}")
 
-            all_url_ids = self.conn.execute('SELECT rowid FROM urllist').fetchall()
+            all_url_ids = self.conn.execute('SELECT rowId FROM URLList').fetchall()
             new_ranks = {}
 
             for (url_id,) in all_url_ids:
@@ -253,24 +253,30 @@ class Searcher:
                 links_to_page = self.conn.execute('SELECT DISTINCT fk_FromURL_Id FROM linkBetweenURL WHERE fk_ToURL_Id = ?', (url_id,)).fetchall()
 
                 for (linking_id,) in links_to_page:
-                    linking_page_rank = self.conn.execute('SELECT score FROM pagerank WHERE urlid = ?', (linking_id,)).fetchone()[0]
+                    linking_page_rank = self.conn.execute('SELECT score FROM pageRank WHERE urlId = ?', (linking_id,)).fetchone()[0]
                     linking_total_links = self.conn.execute('SELECT count(*) FROM linkBetweenURL WHERE fk_FromURL_Id = ?', (linking_id,)).fetchone()[0]
                     page_rank += 0.85 * (linking_page_rank / linking_total_links)
 
                 new_ranks[url_id] = page_rank
 
             for url_id, page_rank in new_ranks.items():
-                self.conn.execute('UPDATE pagerank SET score = ? WHERE urlid = ?', (page_rank, url_id))
+                self.conn.execute('UPDATE pageRank SET score = ? WHERE urlId = ?', (page_rank, url_id))
 
             self.conn.commit()
 
     def pagerankScore(self, rows):
-        page_ranks = [self.conn.execute('SELECT score FROM pagerank WHERE urlid = ?', (row,)).fetchone()[0] for row in rows]
-
+        page_ranks = []
+        for row in rows:
+            score = self.conn.execute('SELECT urlId, score FROM pageRank WHERE urlId = ?', (row[0], )).fetchone()
+            if score is not None:
+                score = score[0]
+                page_ranks.append(score)
+                
+        #page_ranks = [self.conn.execute('SELECT score FROM pageRank WHERE urlId = ?', (row,)).fetchone()[0] for row in rows]
+        return self.normalizeScores(dict(page_ranks))
         max_rank = max(page_ranks)
 
         normalized_scores = [float(rank) / max_rank for rank in page_ranks]
-
         return normalized_scores
 
 
@@ -291,7 +297,8 @@ def main():
     #print(mySearcher.locationScore(rowsLoc=rowsLoc))
     print(mySearcher.getSortedList(mySearchQuery))
 
-    mySearcher.calculatePageRank()
+    #mySearcher.calculatePageRank()
+    print(mySearcher.pagerankScore(rows=rowsLoc))
 
 # ------------------------------------------
 main()
