@@ -1,4 +1,7 @@
 import sqlite3
+import itertools
+import re
+
 
 class Searcher:
 
@@ -19,7 +22,8 @@ class Searcher:
         self.conn.close()
 
 
-    def getWordsIds(self, queryString):
+    def getWordsIds(self, queryString: str) -> list[int]:
+        print("getWordsIds starting")
         """
         Получение идентификаторов для каждого слова в queryString
         :param queryString: поисковый запрос пользователя
@@ -42,10 +46,12 @@ class Searcher:
             else:
                 raise Exception("Одно из слов поискового запроса не найдено:" + word)
         # вернуть список идентификаторов
+        print("getWordsIds done")
         return rowidList
 
 
-    def getMatchRows(self, queryString):
+    def getMatchRows(self, queryString: str) ->tuple[list[tuple[int, int, int]], list[int]]:
+        print("getMatchRows starting")
         """
         Поиск комбинаций из всезх искомых слов в проиндексированных url-адресах
         :param queryString: поисковый запрос пользователя
@@ -84,12 +90,11 @@ class Searcher:
                     sqlpart_Name.append(""" , w{}.location w{}_loc --положение следующего искомого слова""".format(wordIndex, wordIndex))
 
                     #Добавить в sql INNER JOIN
-                    sqlpart_Join.append("""INNER JOIN wordlocation w{}  -- назначим псевдоним w{} для второй из соединяемых таблиц
+                    sqlpart_Join.append("""INNER JOIN wordLocation w{}  -- назначим псевдоним w{} для второй из соединяемых таблиц
                         on w0.fk_URLId=w{}.fk_URLId -- условие объединения""".format(wordIndex, wordIndex, wordIndex))
                     # Добавить в sql ограничивающее условие
                     sqlpart_Condition.append("""  AND w{}.fk_wordId={} -- совпадение w{}... с cоответсвующим словом """.format(wordIndex, wordID, wordIndex ))
-                    pass
-            pass
+                    
 
         # Объеднение запроса из отдельных частей
         sqlFullQuery += "SELECT "
@@ -101,7 +106,7 @@ class Searcher:
 
         # обязательная часть таблица-источник
         sqlFullQuery += "\n"
-        sqlFullQuery += "FROM wordlocation w0 "
+        sqlFullQuery += "FROM wordLocation w0 "
 
         #часть для объединения таблицы INNER JOIN
         for sqlpart in sqlpart_Join:
@@ -114,13 +119,15 @@ class Searcher:
             sqlFullQuery += sqlpart
 
         # Выполнить SQL-запроса и извлеч ответ от БД
-        print(sqlFullQuery)
-        cur = self.conn.execute(sqlFullQuery)
+        #print(sqlFullQuery)
+        cur = self.conn.execute(sqlFullQuery).fetchall()
         rows = [row for row in cur]
+        print("getMatchRows done")
         return rows, wordsidList
 
 
-    def normalizeScores(self, scores, smallIsBetter=0):
+    def normalizeScores(self, scores: dict[int, int], smallIsBetter = 0) -> dict[int, float]:
+        print("normalizeScores starting")
         resultDict = dict() # словарь с результатом
 
         vsmall = 0.00001  # создать переменную vsmall - малая величина, вместо деления на 0
@@ -138,11 +145,12 @@ class Searcher:
                 # вычисление ранга как доли от макс.
                 # ранг нормализованный = тек. значения / макс.
                 resultDict[key] = float(val) / maxscore
-
+        print("normalizeScores done")
         return resultDict
 
     # Ранжирование. Содержимое. 2. Расположение в документе.
-    def locationScore(self, rowsLoc):
+    def locationScore(self, rowsLoc: list[tuple[int, int, int]]) -> dict[int, float]:
+        print("locationScore starting")
         """
         Расчет минимального расстояния от начала страницы у комбинации искомых слов
         :param rows: Список вхождений: urlId, loc_q1, loc_q2, .. слов из поискового запроса "q1 q2 ..." (на основе результата getmatchrows ())
@@ -161,10 +169,10 @@ class Searcher:
             total_distance = sum(locations)
             
             locationsDict[urlId] = min(total_distance, locationsDict[urlId])
-        
+        print("locationScore done")
         return self.normalizeScores(locationsDict, smallIsBetter=1)
 
-    def geturlname(self, id):
+    def geturlname(self, id: int) -> str:
         """
         Получает из БД текстовое поле url-адреса по указанному urlid
         :param id: целочисленный urlid
@@ -176,38 +184,40 @@ class Searcher:
         
         if url is not None:
             return url[0]
-        return None
+        return 'example.com'
 
-    def getSortedList(self, queryString):
+    def getSortedList(self, queryString: str) -> dict[int: list[int, int, int, str]]: # type: ignore
+        print("getSortedList starting")
         """
         На поисковый запрос формирует список URL, вычисляет ранги, выводит в отсортированном порядке
         :param queryString:  поисковый запрос
         :return:
         """
         rowsLoc, wordids = self.getMatchRows(queryString=queryString)
-        # получить rowsLoc и wordids от getMatchRows(queryString)
-        # rowsLoc - Список вхождений: urlId, loc_q1, loc_q2, .. слов из поискового запроса "q1 q2 ..."
-        # wordids - Список wordids.rowid слов поискового запроса
+
 
         m1Scores = self.locationScore(rowsLoc)
-        # Получить m1Scores - словарь {id URL страниц где встретились искомые слова: вычисленный нормализованный РАНГ}
-        # как результат вычисления одной из метрик
+        m2Scores = self.pagerankScore(rowsLoc)
+        
+        m3Scores: dict[int, float] = dict()
+        for key in m1Scores.keys():
+            m3Scores[key] = (m1Scores[key] + m2Scores[key]) / 2
+                
+        m3Scores_sorted = dict(sorted(m3Scores.items(), reverse=True, key=lambda item: item[1]))
 
-        #Создать список для последующей сортировки рангов и url-адресов
-        rankedScoresList = list()
-        for url, score in m1Scores.items():
-            pair = (score, url)
-            rankedScoresList.append( pair )
+        sorted_urls_dct = dict()
+        for k in m3Scores_sorted.keys():
+            id = k
+            m1 = m1Scores[k]
+            m2 = m2Scores[k]
+            m3 = m3Scores_sorted[k]
+            url = self.geturlname(k)
+            sorted_urls_dct[id] = [m1, m2, m3, url]
+    
+        return sorted_urls_dct
 
-        # Сортировка из словаря по убыванию
-        rankedScoresList.sort(reverse=True)
-
-        # Вывод первых N Результатов
-        print("score, urlid, geturlname")
-        for (score, urlid) in rankedScoresList[0:10]:
-            print ( "{:.2f} {:>5}  {}".format ( score, urlid, self.geturlname(urlid)))
-
-    def calculatePageRank(self, iterations=5):
+    def calculatePageRank(self, iterations=5) -> None:
+        print("calculatePageRank starting")
         # Подготовка БД ------------------------------------------
         # стираем текущее содержимое таблицы PageRank
         self.conn.execute('DROP TABLE IF EXISTS pageRank')
@@ -263,21 +273,60 @@ class Searcher:
                 self.conn.execute('UPDATE pageRank SET score = ? WHERE urlId = ?', (page_rank, url_id))
 
             self.conn.commit()
+        print("calculatePageRank done")
 
-    def pagerankScore(self, rows):
+    def pagerankScore(self, rows: list[tuple[int, int, int]]) -> dict[int, float]:
+        print("pagerankScore starting")
         page_ranks = []
         for row in rows:
             score = self.conn.execute('SELECT urlId, score FROM pageRank WHERE urlId = ?', (row[0], )).fetchone()
             if score is not None:
-                score = score[0]
+                score = score
                 page_ranks.append(score)
                 
         #page_ranks = [self.conn.execute('SELECT score FROM pageRank WHERE urlId = ?', (row,)).fetchone()[0] for row in rows]
-        return self.normalizeScores(dict(page_ranks))
-        max_rank = max(page_ranks)
+        print("pagerankScore done")
+        return self.normalizeScores(dict(page_ranks), smallIsBetter=0)
+    
+    def createMarkedHtmlFile(self, markedHTMLFilename: str, testText: list[str], testQueryList: list[str]) -> None:
+        print("createMarkedHtmlFile starting")
+        #Приобразование текста к нижнему регистру
+        for i in range(0, len(testQueryList)):
+            testQueryList[i] = testQueryList[i].lower()
 
-        normalized_scores = [float(rank) / max_rank for rank in page_ranks]
-        return normalized_scores
+        #Получить html-код с маркировкой искомых слов
+        htmlCode = self.getMarkedHTML(testText, testQueryList)
+        #print(htmlCode)
+
+        #сохранить html-код в файл с указанным именем
+        file = open(markedHTMLFilename, 'w', encoding="utf-8")
+        file.write(htmlCode)
+        file.close()
+        print("createMarkedHtmlFile done")
+
+
+    def getMarkedHTML(self, wordList: list, queryList: list[str]) -> str:
+        print("getMarkedHTML starting")
+        """Генерировть html-код с макркировкой указанных слов цветом
+        wordList - список отдельных слов исходного текста
+        queryList - список отдельных искомых слов,
+        """
+
+        resultHTML = "<html><body><p>"
+
+        queryList = [word.lower() for word in queryList]
+
+        for word in wordList:
+            if word.lower() in queryList:
+                # If the word is in the query list, mark it with a specific color
+                resultHTML += '<span style="background-color: red;">{}</span> '.format(word)
+            else:
+                resultHTML += word + ' '
+
+        resultHTML += "</p></body></html>"
+        print("getMarkedHTML done")
+        return resultHTML
+
 
 
 # ------------------------------------------
@@ -289,16 +338,27 @@ def main():
     rowsLoc, wordsidList = mySearcher.getMatchRows(mySearchQuery)
 
     print("-----------------------")
-    #print (mySearchQuery)
-    #print (wordsidList)
-    #for location in rowsLoc:
-    #    print(location)
     
-    #print(mySearcher.locationScore(rowsLoc=rowsLoc))
-    print(mySearcher.getSortedList(mySearchQuery))
+    m1dict = dict(mySearcher.locationScore(rowsLoc))
 
-    #mySearcher.calculatePageRank()
-    print(mySearcher.pagerankScore(rows=rowsLoc))
-
+    m2dict = mySearcher.pagerankScore(rowsLoc)
+    m3dict = dict()
+    
+    for key in m1dict.keys():
+        m3dict[key] = (m1dict[key] + m2dict[key]) / 2
+    m3dict_sorted = dict(sorted(m3dict.items(), reverse=True, key=lambda item: item[1]))
+    
+    urls_3 = dict(itertools.islice(m3dict_sorted.items(), 3))
+    sql = """select wordList.word
+from wordList
+join wordLocation on wordlist.rowId = wordlocation.fk_wordId
+where wordlocation.fk_URLId = ?
+ORDER BY wordlocation.location"""
+    text = []
+    for k, v in urls_3.items():
+        words = mySearcher.conn.execute(sql, (k,)).fetchall()
+        words = [item[0] for item in words]
+        mySearcher.createMarkedHtmlFile(f"page{k}.html", words, mySearchQuery.split())
+    
 # ------------------------------------------
 main()
